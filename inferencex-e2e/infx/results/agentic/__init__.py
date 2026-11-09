@@ -11,6 +11,9 @@ from infx.results.topology import Parallelism, validate_parallelism
 from .request_metrics import compute_request_metrics
 from .server_metrics import compute_server_metrics
 
+# Eviction under load costs up to ~0.2 on healthy runs; a wider gap points at the metric.
+SERVER_HIT_RATE_WARN_GAP = 0.25
+
 
 def _env_int(env: Mapping[str, str], name: str, default: int = 0) -> int:
     """Return ``env[name]`` as an int, or ``default`` when unset or empty."""
@@ -233,6 +236,17 @@ def build_result(
         records=records,
         server_logs=server_logs,
     )
+    server_hit_rate = server_nested["cache"]["gpu_cache_hit_rate"]
+    theoretical_hit_rate = request_nested["cache"]["theoretical_cache_hit_rate"]
+    if (
+        server_hit_rate is not None
+        and theoretical_hit_rate is not None
+        and server_hit_rate < theoretical_hit_rate - SERVER_HIT_RATE_WARN_GAP
+    ):
+        warnings.append(
+            f"Server KV cache hit rate {server_hit_rate:.1%} is more than "
+            f"{SERVER_HIT_RATE_WARN_GAP:.0%} below the theoretical {theoretical_hit_rate:.1%}"
+        )
 
     if "total_tput_tps" in request_flat and num_gpus > 0:
         request_nested["throughput"]["per_gpu"] = {
